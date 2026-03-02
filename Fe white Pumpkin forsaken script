@@ -1,1 +1,246 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
 
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local HRP = character:WaitForChild("HumanoidRootPart")
+local mouse = player:GetMouse()
+
+-- Animation IDs
+local Animations = {
+    Idle = "rbxassetid://129258407299450",
+    Walk = "rbxassetid://120452519884275",
+    Run = "rbxassetid://73353742411211", 
+    Click = "rbxassetid://94958041603347",
+    Q = "rbxassetid://120416070237663",
+    R = "rbxassetid://131305033516773",
+    T = "rbxassetid://110702884830060",
+    E = "rbxassetid://110286373493525",
+    Intro = "rbxassetid://130280467022652",
+    FStart = "rbxassetid://140541272981448",
+    FIdle = "rbxassetid://81119609227998",
+    FWalk = "rbxassetid://119851643291544",
+}
+
+-- Audio IDs
+local Audio = {
+    Intro = "rbxassetid://131385062047424",
+    Main = "rbxassetid://0",
+    Idle = "rbxassetid://0",
+    Click = "rbxassetid://110372418055226",
+    Q = "rbxassetid://115494986218546",
+    R = "rbxassetid://90768093259753",
+    T = "rbxassetid://114741188212484",
+    E = "rbxassetid://95817280332302",
+}
+
+local activeSounds = {}
+local introPlaying = false
+local usingFMove = false
+
+local function playSound(id, parent, volume, looped)
+    local s = Instance.new("Sound", parent)
+    s.SoundId = id
+    s.Volume = volume or 1
+    s.Looped = looped or false
+    s:Play()
+    table.insert(activeSounds, s)
+    return s
+end
+
+local function clearAllSounds()
+    for _, s in ipairs(activeSounds) do
+        if s and s:IsA("Sound") then
+            s:Stop()
+            s:Destroy()
+        end
+    end
+    activeSounds = {}
+end
+
+local function loadAnim(id)
+    local anim = Instance.new("Animation")
+    anim.AnimationId = id
+    return humanoid:LoadAnimation(anim)
+end
+
+-- Function to setup character
+local function setupCharacter(char)
+    humanoid = char:WaitForChild("Humanoid")
+    HRP = char:WaitForChild("HumanoidRootPart")
+
+    -- Load Animations
+    idleTrack = loadAnim(Animations.Idle)
+    walkTrack = loadAnim(Animations.Walk)
+    runTrack = loadAnim(Animations.Run)
+    clickTrack = loadAnim(Animations.Click)
+    qTrack = loadAnim(Animations.Q)
+    rTrack = loadAnim(Animations.R)
+    tTrack = loadAnim(Animations.T)
+    eTrack = loadAnim(Animations.E)
+    introTrack = loadAnim(Animations.Intro)
+    fStartTrack = loadAnim(Animations.FStart)
+    fIdleTrack = loadAnim(Animations.FIdle)
+    fWalkTrack = loadAnim(Animations.FWalk)
+
+    -- Play Intro Animation + Audio
+    local introSound = playSound(Audio.Intro, workspace, 1, false)
+    introTrack:Play()
+    introPlaying = true
+
+    task.delay(3, function()
+        introTrack:Stop()
+        if introSound then introSound:Stop() end
+        introPlaying = false
+        playSound(Audio.Main, workspace, 1, true)
+        idleTrack:Play()
+    end)
+
+    -- Idle / Walk / Run Handling
+    RunService:BindToRenderStep("AnimationHandler", Enum.RenderPriority.Character.Value, function()
+        if introPlaying then return end
+        if usingFMove then return end -- skip normal animation while F Move active
+
+        local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
+
+        if speed > 16 then -- running
+            if not runTrack.IsPlaying then runTrack:Play() end
+            walkTrack:Stop()
+            idleTrack:Stop()
+        elseif speed > 0 then -- walking
+            if not walkTrack.IsPlaying then walkTrack:Play() end
+            runTrack:Stop()
+            idleTrack:Stop()
+        else -- idle
+            if not idleTrack.IsPlaying then idleTrack:Play() end
+            walkTrack:Stop()
+            runTrack:Stop()
+        end
+    end)
+
+    -- Function to play any move
+    local function playMove(track, soundId)
+        track:Play()
+        local s = playSound(soundId, workspace, 1, false)
+        track.Stopped:Connect(function()
+            s:Stop()
+            s:Destroy()
+        end)
+    end
+
+    -- Function to activate F Move (startup + F Idle/Walk)
+    local function activateFMove()
+        if usingFMove then return end
+        usingFMove = true
+        idleTrack:Stop()
+        walkTrack:Stop()
+
+        -- Play startup animation first
+        fStartTrack:Play()
+        fStartTrack.Stopped:Connect(function()
+            -- After startup ends, play F Idle/Walk
+            fIdleTrack:Play()
+            local fConnection
+            fConnection = RunService.RenderStepped:Connect(function()
+                if introPlaying then return end
+                local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
+                if speed > 0 then
+                    if not fWalkTrack.IsPlaying then fWalkTrack:Play() end
+                    fIdleTrack:Stop()
+                else
+                    if not fIdleTrack.IsPlaying then fIdleTrack:Play() end
+                    fWalkTrack:Stop()
+                end
+            end)
+            -- Revert after 9 seconds
+            task.delay(9, function()
+                usingFMove = false
+                fConnection:Disconnect()
+                fIdleTrack:Stop()
+                fWalkTrack:Stop()
+                idleTrack:Play()
+            end)
+        end)
+    end
+
+    -- Input Handling
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if introPlaying or gameProcessed then return end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            playMove(clickTrack, Audio.Click)
+        elseif input.KeyCode == Enum.KeyCode.Q then
+            playMove(qTrack, Audio.Q)
+        elseif input.KeyCode == Enum.KeyCode.R then
+            playMove(rTrack, Audio.R)
+        elseif input.KeyCode == Enum.KeyCode.T then
+            playMove(tTrack, Audio.T)
+        elseif input.KeyCode == Enum.KeyCode.E then
+            playMove(eTrack, Audio.E)
+        elseif input.KeyCode == Enum.KeyCode.F then
+            activateFMove()
+        end
+    end)
+
+    -- Mobile Buttons (Responsive Bottom-Right)
+    if UserInputService.TouchEnabled then
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Parent = player:WaitForChild("PlayerGui")
+        screenGui.ResetOnSpawn = false
+
+        local buttons = {
+            {Text="Click", Track=clickTrack, Audio=Audio.Click},
+            {Text="Q", Track=qTrack, Audio=Audio.Q},
+            {Text="R", Track=rTrack, Audio=Audio.R},
+            {Text="T", Track=tTrack, Audio=Audio.T},
+            {Text="E", Track=eTrack, Audio=Audio.E},
+            {Text="F", Track=nil, Audio=nil}, -- F Move special handling
+        }
+
+        local buttonWidth = 0.12
+        local buttonHeight = 0.08
+        local padding = 0.01
+        local camera = workspace.CurrentCamera
+
+        for i, btnData in ipairs(buttons) do
+            local btn = Instance.new("TextButton")
+            btn.AnchorPoint = Vector2.new(1, 1)
+            btn.Size = UDim2.new(buttonWidth, 0, buttonHeight, 0)
+            btn.Position = UDim2.new(
+                1, 
+                -(buttonWidth + padding) * (#buttons - i + 0.5) * camera.ViewportSize.X, 
+                1, 
+                -buttonHeight * camera.ViewportSize.Y - 10
+            )
+            btn.Text = btnData.Text
+            btn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+            btn.TextScaled = true
+            btn.Parent = screenGui
+
+            btn.MouseButton1Click:Connect(function()
+                if btnData.Text == "F" then
+                    activateFMove()
+                else
+                    playMove(btnData.Track, btnData.Audio)
+                end
+            end)
+        end
+    end
+end
+
+-- Keep script running on death
+humanoid.Died:Connect(function()
+    clearAllSounds()
+end)
+
+-- Initial setup
+setupCharacter(character)
+
+-- Respawn setup
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    setupCharacter(newChar)
+end)
